@@ -20,7 +20,7 @@ class Season:
     def __init__(self, league, index):
         self.league = league
         self.index = index
-        self.playoffs_seeds = {seed: None for seed in range(1, 9)}
+        self.playoffs_seeds = {}
 
     def simulate(self, start_date=None):
         nba = self.league
@@ -60,9 +60,14 @@ class Season:
                     print('{0: <25}{1: >3}\t{2: >3}\t{3:.3f}'.format(team.name, str(team.seasons[self.index].wins), str(team.seasons[self.index].losses), win_pct))
         print('=============================================\n\n')
 
-    def seed_playoffs(self):
-        min_wins = {conf: self.standings(conf)[7].seasons[self.index].wins for conf in League.DIVISIONS.keys()}
-        return {conf: [team for team in self.standings(conf) if team.seasons[self.index].wins >= min_wins[conf]] for conf in League.DIVISIONS.keys()}
+    def playoff_seeds(self, conference):
+        division_winners = [self.standings(conference, division) for division in League.DIVISIONS[conference]]
+        next_best = max([team for team in self.standings(conference) if team not in division_winners])
+        top_four = division_winners + [next_best]
+        next_four = [team for team in self.standings(conference) if team not in top_four][:4]
+        playoff_teams = top_four + next_four
+        return dict(zip(range(1, 9), playoff_teams))
+
 
     def print_playoffs(self):
         for conference in League.DIVISIONS.keys():
@@ -197,6 +202,7 @@ class Team:
         self.losses = 0
         self.playoff_seed = 15
         self.wins_against = {conf: {div: {} for div in League.DIVISIONS[conf]} for conf in League.DIVISIONS}
+        self.losses_against = {conf: {div: {} for div in League.DIVISIONS[conf]} for conf in League.DIVISIONS}
 
     def conf_win_pct(self):
         wins = sum([wins ])
