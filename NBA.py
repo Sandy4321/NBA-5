@@ -20,7 +20,6 @@ class Season:
     def __init__(self, league, index):
         self.league = league
         self.index = index
-        self.playoffs_seeds = {}
 
     def simulate(self, start_date=None):
         nba = self.league
@@ -54,34 +53,30 @@ class Season:
                 print('Team\t\t\t  W\t L\tPct')
                 print('---------------------------------------------')
                 for team in self.standings(conference, division):
-                    wins = team.seasons[self.index].wins
-                    losses = team.seasons[self.index].losses
-                    win_pct = wins/(wins + losses)
-                    print('{0: <25}{1: >3}\t{2: >3}\t{3:.3f}'.format(team.name, str(team.seasons[self.index].wins), str(team.seasons[self.index].losses), win_pct))
+                    win_pct = team.wins/(team.wins + team.losses)
+                    print('{0: <25}{1: >3}\t{2: >3}\t{3:.3f}'.format(team.name, str(team.wins), str(team.losses), win_pct))
         print('=============================================\n\n')
 
     def playoff_seeds(self, conference):
-        division_winners = [self.standings(conference, division) for division in League.DIVISIONS[conference]]
+        division_winners = [self.standings(conference, division)[0] for division in League.DIVISIONS[conference]]
         next_best = max([team for team in self.standings(conference) if team not in division_winners])
-        top_four = division_winners + [next_best]
+        top_four = sorted(division_winners + [next_best], reverse=True)
         next_four = [team for team in self.standings(conference) if team not in top_four][:4]
         playoff_teams = top_four + next_four
         return dict(zip(range(1, 9), playoff_teams))
 
-
     def print_playoffs(self):
         for conference in League.DIVISIONS.keys():
-            wins = [team.seasons[self.index].wins for team in self.seed_playoffs()[conference]]
             print('\n=====================================================')
             print(conference.title())
             print('-----------------------------------------------------')
             print('Seed\tTeam\t\t\t  W\t L\tPct')
             print('-----------------------------------------------------')
-            for index, team in enumerate(self.seed_playoffs()[conference]):
-                wins = team.seasons[self.index].wins
-                losses = team.seasons[self.index].losses
-                win_pct = wins/(wins + losses)
-                print('{0: >4}\t{1: <25}{2: >3}\t{3: >3}\t{4:.3f}'.format(index + 1, team.name, str(wins), str(losses), win_pct))
+            playoffs = self.playoff_seeds(conference)
+            for seed in playoffs:
+                team = playoffs[seed]
+                win_pct = team.wins/(team.wins + team.losses)
+                print('{0: >4}\t{1: <25}{2: >3}\t{3: >3}\t{4:.3f}'.format(seed, team.name, str(team.wins), str(team.losses), win_pct))
             print('=====================================================\n')
 
 
@@ -94,14 +89,18 @@ class Game:
         self.road_score = road_score
 
     def simulate(self, season_index, update_standings=True):
-        if self.home.name not in self.road.wins_against:
-            self.road.wins_against[self.home.name] = 0
-        if self.home.name not in self.road.losses_against:
-            self.road.losses_against[self.home.name] = 0
-        if self.road.name not in self.home.wins_against:
-            self.home.wins_against[self.road.name] = 0
-        if self.road.name not in self.home.losses_against:
-            self.home.losses_against[self.road.name] = 0
+        road_wa = self.road.wins_against[self.home.conference][self.home.division]
+        home_wa = self.home.wins_against[self.road.conference][self.road.division]
+        road_la = self.road.losses_against[self.home.conference][self.home.division]
+        home_la = self.home.losses_against[self.road.conference][self.road.division]
+        if self.home.name not in road_wa:
+            road_wa[self.home.name] = 0
+        if self.home.name not in road_la:
+            road_la[self.home.name] = 0
+        if self.road.name not in home_wa:
+            home_wa[self.road.name] = 0
+        if self.road.name not in home_la:
+            home_la[self.road.name] = 0
         if self.home_score > self.road_score:
             winner = self.home
             loser = self.road
@@ -116,9 +115,9 @@ class Game:
                 winner = self.road
                 loser = self.home
         if update_standings:
-            winner.wins_against[loser.name] += 1
+            winner.wins_against[loser.conference][loser.division][loser.name] += 1
             winner.wins += 1
-            loser.losses_against[winner.name] += 1
+            loser.losses_against[winner.conference][winner.division][winner.name] += 1
             loser.losses += 1
         return winner
 
@@ -205,7 +204,15 @@ class Team:
         self.losses_against = {conf: {div: {} for div in League.DIVISIONS[conf]} for conf in League.DIVISIONS}
 
     def conf_win_pct(self):
-        wins = sum([wins ])
+        # TODO: make this a list comprehension
+        w = 0
+        l = 0
+        for division in League.DIVISIONS[self.conference]:
+            for team in self.wins_against[self.conference][division]:
+                w += self.wins_against[self.conference][division][team]
+            for team in self.losses_against[self.conference][division]:
+                l += self.losses_against[self.conference][division][team]
+        return w/(w + l)
 
     def win_pct_vs(self, opponent):
         if opponent.name not in self.wins_against[opponent.conference][opponent.division]:
