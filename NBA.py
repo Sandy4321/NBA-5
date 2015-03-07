@@ -1,6 +1,73 @@
 from __future__ import division, print_function
 import random
 import operator
+import csv
+import datetime
+from dateutil import parser
+from numpy import median, mean
+
+class Simulator:
+    def __init__(self, simulation_count, team_file, schedule_file):
+        self.simulation_count = simulation_count
+        self.team_file = team_file
+        self.schedule_file = schedule_file
+        self.seasons = []
+        self.league = League()
+        self.load_files()
+        self.team_wins = {team: [] for team in self.league.teams.keys()}
+        self.team_playoffs = {team: 0 for team in self.league.teams.keys()}
+        self.team_playoff_seed = {team: [] for team in self.league.teams.keys()}
+
+    def load_files(self):
+        with open(self.team_file) as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                team = Team(row)
+                self.league.add_team(team)
+        with open(self.schedule_file) as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                home = self.league.teams[row['home_team']]
+                road = self.league.teams[row['road_team']]
+                home_score = 0 if row['home_score'] == '' else int(row['home_score'])
+                road_score = 0 if row['road_score'] == '' else int(row['road_score'])
+                game = Game(parser.parse(row['date']), home, road, home_score, road_score)
+                self.league.schedule.append(game)
+
+    def simulate(self):
+        for season_index in range(self.simulation_count):
+            season = Season(self.league, season_index)
+            season.simulate()
+            self.seasons.append(season)
+            playoffs = {conf: season.playoff_seeds(conf) for conf in League.DIVISIONS.keys()}
+            for team in self.league.teams.keys():
+                self.team_wins[team].append(self.league.teams[team].wins)
+                if season.made_playoffs(team):
+                    self.team_playoffs[team] += 1
+                self.team_playoff_seed[team].append(season.playoff_seed(team))
+
+    def print_results(self):
+        for conference in League.DIVISIONS.keys():
+            teams = sorted([team for team in self.league.teams.keys()], key=lambda x: sum(self.team_wins[x]), reverse=True)
+            print('\n======================================================================================')
+            print(conference.title())
+            print('======================================================================================')
+            print('Team\t\t\t  W\t  L\tPct\t Min\t Med\t Avg\t Max\tPO Pct')
+            print('--------------------------------------------------------------------------------------')
+            for team_name in teams:
+                if self.league.teams[team_name].conference == conference:
+                    start_wins = self.league.teams[team_name].starting_wins
+                    start_losses = self.league.teams[team_name].starting_losses
+                    win_pct = sum(self.team_wins[team_name])/(self.simulation_count * 82)
+                    min_wins = min(self.team_wins[team_name])
+                    med_wins = median(self.team_wins[team_name])
+                    avg_wins = mean(self.team_wins[team_name])
+                    max_wins = max(self.team_wins[team_name])
+                    po_pct = self.team_playoffs[team_name]/self.simulation_count
+                    print('{0: <25}{1: >3}\t{2: >3}\t{3:.3f}\t{4: >3}\t{5: .1f}\t{6: .1f}\t{7: >3}\t{8:.3f}'
+                        .format(team_name, start_wins, start_losses, win_pct, min_wins, med_wins, avg_wins, max_wins, po_pct))
+            print('======================================================================================\n\n')
+
 
 class League:
     DIVISIONS = {'east': ['southeast', 'atlantic', 'central'], 'west': ['northwest', 'pacific', 'southwest']}
@@ -61,9 +128,20 @@ class Season:
         division_winners = [self.standings(conference, division)[0] for division in League.DIVISIONS[conference]]
         next_best = max([team for team in self.standings(conference) if team not in division_winners])
         top_four = sorted(division_winners + [next_best], reverse=True)
-        next_four = [team for team in self.standings(conference) if team not in top_four][:4]
-        playoff_teams = top_four + next_four
-        return dict(zip(range(1, 9), playoff_teams))
+        the_rest = [team for team in self.standings(conference) if team not in top_four]
+        seeded_teams = top_four + the_rest
+        return dict(zip(range(1, 16), seeded_teams))
+
+    def playoff_seed(self, team_name):
+        conf = self.league.teams[team_name].conference
+        playoff_seeds = self.playoff_seeds(conf)
+        for index in playoff_seeds.keys():
+            if playoff_seeds[index].name == team_name:
+                return index
+        return 16
+
+    def made_playoffs(self, team_name):
+        return (self.playoff_seed(team_name) <= 8)
 
     def print_playoffs(self):
         for conference in League.DIVISIONS.keys():
@@ -77,6 +155,8 @@ class Season:
                 team = playoffs[seed]
                 win_pct = team.wins/(team.wins + team.losses)
                 print('{0: >4}\t{1: <25}{2: >3}\t{3: >3}\t{4:.3f}'.format(seed, team.name, str(team.wins), str(team.losses), win_pct))
+                if seed == 8:
+                    print('-----------------------------------------------------')
             print('=====================================================\n')
 
 
@@ -87,6 +167,7 @@ class Game:
         self.road = road
         self.home_score = home_score
         self.road_score = road_score
+        self.simulated = False
 
     def simulate(self, season_index, update_standings=True):
         road_wa = self.road.wins_against[self.home.conference][self.home.division]
@@ -149,6 +230,8 @@ class Team:
         self.abbreviation = args['abbreviation']
         self.conference = args['conference']
         self.division = args['division']
+        self.starting_wins = args['wins']
+        self.starting_losses = args['losses']
         self.reset_record()
         self.eff = {'off' : float(args['offeff']), 'def' : float(args['defeff'])}
 
