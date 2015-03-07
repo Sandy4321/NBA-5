@@ -1,14 +1,15 @@
 from __future__ import division, print_function
+import sys
 import random
 import operator
 import csv
 import datetime
 from dateutil import parser
 from numpy import median, mean
+import locale
 
 class Simulator:
-    def __init__(self, simulation_count, team_file, schedule_file):
-        self.simulation_count = simulation_count
+    def __init__(self, team_file, schedule_file):
         self.team_file = team_file
         self.schedule_file = schedule_file
         self.seasons = []
@@ -17,6 +18,7 @@ class Simulator:
         self.team_wins = {team: [] for team in self.league.teams.keys()}
         self.team_playoffs = {team: 0 for team in self.league.teams.keys()}
         self.team_playoff_seed = {team: [] for team in self.league.teams.keys()}
+        self.sim_count = 1
 
     def load_files(self):
         with open(self.team_file) as csvfile:
@@ -34,19 +36,24 @@ class Simulator:
                 game = Game(parser.parse(row['date']), home, road, home_score, road_score)
                 self.league.schedule.append(game)
 
-    def simulate(self):
-        for season_index in range(self.simulation_count):
+    def simulate(self, sim_count=None, print_index=False):
+        if sim_count is not None:
+            self.sim_count = sim_count
+        for season_index in range(sim_count):
             season = Season(self.league, season_index)
             season.simulate()
             self.seasons.append(season)
-            playoffs = {conf: season.playoff_seeds(conf) for conf in League.DIVISIONS.keys()}
-            for team in self.league.teams.keys():
-                self.team_wins[team].append(self.league.teams[team].wins)
-                if season.made_playoffs(team):
-                    self.team_playoffs[team] += 1
-                self.team_playoff_seed[team].append(season.playoff_seed(team))
+            for team_name, team in self.league.teams.iteritems():
+                self.team_wins[team_name].append(team.wins)
+                if team.made_playoffs():
+                    self.team_playoffs[team_name] += 1
+                self.team_playoff_seed[team_name].append(team.playoff_seed)
+            if print_index:
+                locale.setlocale(locale.LC_ALL, 'en_US')
+                print('{} of {}'.format(locale.format('%d', season_index + 1, grouping=True), locale.format('%d', self.sim_count, grouping=True)), file=sys.stderr)
 
     def print_results(self):
+        print('Simulation Count: {}'.format(self.sim_count))
         for conference in League.DIVISIONS.keys():
             teams = sorted([team for team in self.league.teams.keys()], key=lambda x: sum(self.team_wins[x]), reverse=True)
             print('\n======================================================================================')
@@ -58,12 +65,12 @@ class Simulator:
                 if self.league.teams[team_name].conference == conference:
                     start_wins = self.league.teams[team_name].starting_wins
                     start_losses = self.league.teams[team_name].starting_losses
-                    win_pct = sum(self.team_wins[team_name])/(self.simulation_count * 82)
+                    win_pct = sum(self.team_wins[team_name])/(self.sim_count * 82)
                     min_wins = min(self.team_wins[team_name])
                     med_wins = median(self.team_wins[team_name])
                     avg_wins = mean(self.team_wins[team_name])
                     max_wins = max(self.team_wins[team_name])
-                    po_pct = self.team_playoffs[team_name]/self.simulation_count
+                    po_pct = self.team_playoffs[team_name]/self.sim_count
                     print('{0: <25}{1: >3}\t{2: >3}\t{3:.3f}\t{4: >3}\t{5: .1f}\t{6: .1f}\t{7: >3}\t{8:.3f}'
                         .format(team_name, start_wins, start_losses, win_pct, min_wins, med_wins, avg_wins, max_wins, po_pct))
             print('======================================================================================\n\n')
@@ -89,12 +96,12 @@ class Season:
         self.index = index
 
     def simulate(self, start_date=None):
-        nba = self.league
-        for team in nba.teams:
-            nba.teams[team].reset_record()
-        for game in nba.schedule:
+        for team_name, team in self.league.teams.iteritems():
+            team.reset_record()
+        for game in self.league.schedule:
             if start_date is None or game.date >= start_date:
                 game.simulate(self.index, True)
+        self.finish()
 
     def standings(self, conference, division=None):
         if division is None:
@@ -140,9 +147,6 @@ class Season:
                 return index
         return 16
 
-    def made_playoffs(self, team_name):
-        return (self.playoff_seed(team_name) <= 8)
-
     def print_playoffs(self):
         for conference in League.DIVISIONS.keys():
             print('\n=====================================================')
@@ -158,6 +162,12 @@ class Season:
                 if seed == 8:
                     print('-----------------------------------------------------')
             print('=====================================================\n')
+
+    def finish(self):
+        seeds = {conf: self.playoff_seeds(conf) for conf in League.DIVISIONS.keys()}
+        for conf in seeds.keys():
+            for seed, team in seeds[conf].iteritems():
+                self.league.teams[team.name].playoff_seed = seed
 
 
 class Game:
@@ -282,7 +292,7 @@ class Team:
     def reset_record(self):
         self.wins = 0
         self.losses = 0
-        self.playoff_seed = 15
+        self.playoff_seed = 16
         self.wins_against = {conf: {div: {} for div in League.DIVISIONS[conf]} for conf in League.DIVISIONS}
         self.losses_against = {conf: {div: {} for div in League.DIVISIONS[conf]} for conf in League.DIVISIONS}
 
@@ -307,3 +317,6 @@ class Team:
         else:
             losses = opponent.wins_against[self.conference][self.division][self.name]
         return wins / (wins + losses)
+
+    def made_playoffs(self):
+        return self.playoff_seed <= 8
