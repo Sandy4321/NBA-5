@@ -9,9 +9,10 @@ from numpy import median, mean
 import locale
 
 class Simulator:
-    def __init__(self, team_file, schedule_file):
+    def __init__(self, team_file, schedule_file, output_file=None):
         self.team_file = team_file
         self.schedule_file = schedule_file
+        self.output_file = output_file
         self.seasons = []
         self.league = League()
         self.load_files()
@@ -41,7 +42,7 @@ class Simulator:
             self.sim_count = sim_count
         for season_index in range(sim_count):
             season = Season(self.league, season_index)
-            season.simulate()
+            season.simulate(self.output_file)
             self.seasons.append(season)
             for team_name, team in self.league.teams.iteritems():
                 self.team_wins[team_name].append(team.wins)
@@ -95,13 +96,21 @@ class Season:
         self.league = league
         self.index = index
 
-    def simulate(self, start_date=None):
+    def simulate(self, output_file, start_date=None):
         for team_name, team in self.league.teams.iteritems():
             team.reset_record()
         for game in self.league.schedule:
             if start_date is None or game.date >= start_date:
                 game.simulate(self.index, True)
         self.finish()
+        if output_file is not None:
+            with open(output_file, 'ab+') as csvfile:
+                writer = csv.writer(csvfile, delimiter=',')
+                if self.index == 0:
+                    writer.writerows([['sim_index', 'team_name', 'w', 'l', 'po_seed']])
+                data = [[self.index, team.name, team.wins, team.losses, team.playoff_seed]
+                         for team_name, team in self.league.teams.iteritems()]
+                writer.writerows(data)
 
     def standings(self, conference, division=None):
         if division is None:
